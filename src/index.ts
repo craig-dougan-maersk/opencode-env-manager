@@ -265,6 +265,13 @@ export default Plugin.define({
         const value = input as SessionInput
         return state(value.sessionID, value.baseEnv)
       },
+      // Name only: other plugins can follow the active profile without
+      // receiving the resolved environment or any secret values.
+      activeProfile: async (input: unknown) => {
+        const value = input as { sessionID?: string }
+        const profile = await activeProfile(value.sessionID)
+        return { profile: profile.name, defaultProfile: config.defaultProfile }
+      },
       setProfile: async (input: unknown) => {
         const value = input as { sessionID: string; profile: string; baseEnv?: Record<string, string> }
         return serial(async () => {

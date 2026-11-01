@@ -63,6 +63,19 @@ const definition = Rpc.define({
   methods: {
     state: { input: sessionInput, output: result },
     resolve: { input: sessionInput, output: result },
+    activeProfile: {
+      input: {
+        type: "object",
+        properties: { sessionID: string },
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: { profile: string, defaultProfile: string },
+        required: ["profile"],
+        additionalProperties: false,
+      },
+    },
     setProfile: { input: sessionProfileInput, output: result },
     setOverride: { input: sessionValueInput, output: result },
     unsetKey: { input: sessionKeyInput, output: result },
