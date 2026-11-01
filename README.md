@@ -265,7 +265,21 @@ find "$HOME/.password-store" -name '*.gpg' | sed 's|.*/\.password-store/||; s|\.
 `store` doubles as the label shown in the status dialog when the provider does
 not consume it.
 
-### Limits
+### Plugin API
+
+Other OpenCode plugins can read vault entries through two RPC methods on the
+`env.manager` RPC id:
+
+- `vaultStatus()` lists layer status and entry names, never values.
+- `vaultGet({ entries: string[] })` returns
+  `{ values, missing, warnings, searched }` for up to 64 named entries.
+
+`vaultGet` is a plugin-to-plugin API. It is not exposed as a tool, so the model
+never sees the result. The calling plugin is responsible for approving whatever
+it does with the material. The SSH manager plugin uses this to load private
+keys into a managed `ssh-agent` without putting the key in a shell command.
+
+## Limits
 
 - Shell commands only, same as the rest of this plugin: MCP servers, the model
   process and other tools never see these variables.

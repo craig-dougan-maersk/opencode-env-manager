@@ -147,6 +147,17 @@ const definition = Rpc.define({
       },
       output: result,
     },
+    vaultGet: {
+      input: {
+        type: "object",
+        properties: {
+          entries: { type: "array", items: string, maxItems: 64 },
+        },
+        required: ["entries"],
+        additionalProperties: false,
+      },
+      output: result,
+    },
     addEnvFile: {
       input: {
         type: "object",

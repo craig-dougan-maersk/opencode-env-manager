@@ -403,6 +403,33 @@ export default Plugin.define({
         })
       },
       vaultStatus: async () => vaultReader.status(),
+      vaultGet: async (input: unknown) => {
+        const value = input as { entries?: unknown }
+        if (!Array.isArray(value?.entries)) throw new Error("entries must be an array")
+        if (value.entries.length > 64) throw new Error("At most 64 vault entries may be requested at once")
+        const entries: string[] = []
+        for (const item of value.entries) {
+          if (typeof item !== "string") throw new Error("Vault entry names must be strings")
+          const entry = item.trim()
+          if (!isValidEntryName(entry)) {
+            throw new Error(`Invalid vault entry name: ${entry}`)
+          }
+          if (!entries.includes(entry)) entries.push(entry)
+        }
+        if (!entries.length) {
+          return { values: {}, missing: [], warnings: [], searched: [] }
+        }
+
+        const resolved = await vaultReader.resolve(
+          Object.fromEntries(entries.map((entry) => [entry, entry])),
+        )
+        return {
+          values: resolved.values,
+          missing: resolved.missing,
+          warnings: resolved.warnings,
+          searched: resolved.searched,
+        }
+      },
       addEnvFile: async (input: unknown) => {
         const value = input as { profile: string; path: string; baseEnv?: Record<string, string> }
         const file = value.path.trim()
