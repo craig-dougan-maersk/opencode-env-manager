@@ -1,0 +1,4 @@
+{
+  "//": "Intentionally empty: build.ts passes this so Bun's built-in JSX transform (React semantics) stands down and @opentui/solid's Babel plugin performs the real Solid lowering.",
+  "compilerOptions": {}
+}
