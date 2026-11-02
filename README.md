@@ -35,9 +35,15 @@ server changes hot-reload. After editing `src/tui.tsx`, rebuild the bundle:
 
 ```bash
 npm install        # dev dependencies
-npm run build      # regenerates tui.js (bun run build.ts)
+npm run compile    # regenerates tui.js (bun run build.ts)
 npm run typecheck
 ```
+
+Do not rename that script to `build`, `prepare`, `prepack`, `install`,
+`preinstall` or `postinstall`: npm treats any of those as a build step and runs
+them when the package is installed from git, and OpenCode's git-dependency
+preparation fails on them. `compile` avoids the hook while leaving the command
+available locally.
 
 ## Usage
 
