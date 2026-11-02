@@ -1,6 +1,6 @@
 import fs from "node:fs/promises"
 import path from "node:path"
-import { emptyVault, isValidSecretBinding, normalizeVault, type VaultConfig } from "./vault.js"
+import { emptySecretStore, isValidSecretBinding, normalizeSecretStore, type SecretStoreConfig } from "./secret-store.js"
 
 export const DEFAULT_PROFILE = "default"
 export const DEFAULT_ENV_FILE = ".env"
@@ -11,7 +11,7 @@ export interface Profile {
   description?: string
   envFiles: string[]
   variables: Record<string, string>
-  /** Environment variable name -> entry name inside the encrypted vault. */
+  /** Environment variable name -> entry name inside the secret store. */
   secrets: Record<string, string>
 }
 
@@ -19,7 +19,7 @@ export interface Config {
   version: 1
   defaultProfile: string
   profiles: Record<string, Profile>
-  vault: VaultConfig
+  secretStore: SecretStoreConfig
 }
 
 export interface LoadedConfig {
@@ -48,7 +48,7 @@ export function defaultConfig(): Config {
     profiles: {
       [DEFAULT_PROFILE]: newProfile("Default profile"),
     },
-    vault: emptyVault(),
+    secretStore: emptySecretStore(),
   }
 }
 
@@ -127,7 +127,11 @@ export function normalizeConfig(raw: unknown): Config {
   const requested = typeof raw.defaultProfile === "string" ? raw.defaultProfile : DEFAULT_PROFILE
   const defaultProfile = ordered[requested] ? requested : DEFAULT_PROFILE
 
-  return { version: 1, defaultProfile, profiles: ordered, vault: normalizeVault(raw.vault) }
+  // `secretStore` is current; `vault` is the pre-rename key, still read once and
+  // rewritten as `secretStore` on the next save.
+  const secretStore = raw.secretStore !== undefined ? raw.secretStore : raw.vault
+
+  return { version: 1, defaultProfile, profiles: ordered, secretStore: normalizeSecretStore(secretStore) }
 }
 
 function normalizeProfile(value: unknown): Profile {

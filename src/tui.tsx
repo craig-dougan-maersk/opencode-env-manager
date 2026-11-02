@@ -32,7 +32,7 @@ type EnvState = {
   warnings: string[]
   overrides: { set: Record<string, string>; unset: string[] }
   secrets: Array<{ name: string; entry: string }>
-  vault: {
+  secretStore: {
     configured: boolean
     stores: string[]
     ttlSeconds: number
@@ -150,20 +150,20 @@ export default Plugin.define({
 
     function profileDescription(profile: ProfileInfo): string {
       const parts = [`${profile.variableCount} variable${profile.variableCount === 1 ? "" : "s"}`]
-      if (profile.secretCount) parts.push(`${profile.secretCount} vault secret${profile.secretCount === 1 ? "" : "s"}`)
+      if (profile.secretCount) parts.push(`${profile.secretCount} secret${profile.secretCount === 1 ? "" : "s"}`)
       parts.push(profile.envFiles.length ? profile.envFiles.join(", ") : "no .env files")
       if (profile.isDefault) parts.push("default for new sessions")
       if (profile.active) parts.push("active")
       return parts.join(" · ")
     }
 
-    async function showVaultStatus(configPath: string) {
+    async function showSecretStoreStatus(configPath: string) {
       try {
-        const status: any = await rpc.vaultStatus({ baseEnv: terminalEnv })
+        const status: any = await rpc.secretStoreStatus({ baseEnv: terminalEnv })
         if (!status?.configured) {
           await context.ui.dialog.alert({
-            title: "Vault not configured",
-            message: `Add a "vault" block to ${configPath}, or a global layer in ~/.config/opencode/env-manager.json.`,
+            title: "Secret store not configured",
+            message: `Add a "secretStore" block to ${configPath}, or a global layer in ~/.config/opencode/env-manager.json.`,
           })
           return
         }
@@ -180,11 +180,11 @@ export default Plugin.define({
 
         if (status.warnings?.length) lines.push("", ...status.warnings.map((warning: string) => `⚠ ${warning}`))
         await context.ui.dialog.alert({
-          title: `Vault status — ${status.layers.length} layer${status.layers.length === 1 ? "" : "s"}`,
+          title: `Secret store status — ${status.layers.length} layer${status.layers.length === 1 ? "" : "s"}`,
           message: lines.join("\n"),
         })
       } catch (error) {
-        toastError("Vault status failed", error)
+        toastError("Secret store status failed", error)
       }
     }
 
@@ -207,10 +207,10 @@ export default Plugin.define({
         let revealRequested = false
         const options = [
           ...state.secrets.map((secret) => ({
-            title: `${secret.name} = •••••• (vault)`,
+            title: `${secret.name} = •••••• (secret store)`,
             value: `secret:${secret.name}`,
             description: `entry ${secret.entry} · injected per command`,
-            category: "Vault",
+            category: "Secrets",
           })),
           ...state.entries.map((entry) => ({
             title: `${entry.key} = ${truncate(visibleValue(entry, reveal))}`,
@@ -269,7 +269,7 @@ export default Plugin.define({
           if (!binding) continue
           await context.ui.dialog.alert({
             title: binding.name,
-            message: `Stored in the vault as "${binding.entry}".\n\nThis value is never displayed and never added to the session environment. It is decrypted only for a shell command that references $${binding.name}, after you approve that command.`,
+            message: `Stored in the secret store as "${binding.entry}".\n\nThis value is never displayed and never added to the session environment. It is decrypted only for a shell command that references $${binding.name}, after you approve that command.`,
           })
           continue
         }
@@ -331,7 +331,7 @@ export default Plugin.define({
             { title: "Set / override variable…", value: "set" },
             { title: "Remove variable…", value: "remove", disabled: profile.variableCount === 0 },
             {
-              title: "Manage vault secrets…",
+              title: "Manage secret-store secrets…",
               value: "secrets",
               description: profile.secretCount ? `${profile.secretCount} bound` : "none bound",
             },
@@ -378,11 +378,11 @@ export default Plugin.define({
 
           if (action === "secrets") {
             const sub = await context.ui.dialog.select({
-              title: `Vault secrets for "${name}"`,
+              title: `Secret-store secrets for "${name}"`,
               options: [
-                { title: "Bind a variable to a vault entry…", value: "add" },
+                { title: "Bind a variable to a secret-store entry…", value: "add" },
                 { title: "Remove a binding…", value: "remove", disabled: profile.secretCount === 0 },
-                { title: "Vault status / test decryption…", value: "test" },
+                { title: "Secret store status / test decryption…", value: "test" },
                 { title: "Back", value: "back" },
               ],
             })
@@ -399,7 +399,7 @@ export default Plugin.define({
               if (!variable) continue
               const entry = (
                 await context.ui.dialog.prompt({
-                  title: `Vault entry for ${variable}`,
+                  title: `Secret-store entry for ${variable}`,
                   description: "Entry name inside the decrypted store, for example openai/api-key.",
                   placeholder: "openai/api-key",
                 })
@@ -411,7 +411,7 @@ export default Plugin.define({
 
             if (sub === "remove") {
               const variable = await context.ui.dialog.select({
-                title: `Remove vault binding from "${name}"`,
+                title: `Remove secret-store binding from "${name}"`,
                 options: Object.keys(profile.secrets)
                   .sort()
                   .map((item) => ({ title: item, value: item, description: `entry ${profile.secrets[item]}` })),
@@ -422,7 +422,7 @@ export default Plugin.define({
             }
 
             if (sub === "test") {
-              await showVaultStatus(fresh.configPath)
+              await showSecretStoreStatus(fresh.configPath)
             }
             continue
           }
@@ -651,12 +651,12 @@ export default Plugin.define({
               category: "Defaults",
             },
             {
-              title: "Vault status…",
-              value: "vault",
-              description: state.vault.configured
-                ? `${state.vault.stores.length} layer${state.vault.stores.length === 1 ? "" : "s"} · ${state.secrets.length} bound`
+              title: "Secret store status…",
+              value: "secret-store",
+              description: state.secretStore.configured
+                ? `${state.secretStore.stores.length} layer${state.secretStore.stores.length === 1 ? "" : "s"} · ${state.secrets.length} bound`
                 : "not configured",
-              category: "Vault",
+              category: "Secrets",
             },
             { title: "Reload config from disk", value: "reload", category: "Defaults" },
           ],
@@ -754,8 +754,8 @@ export default Plugin.define({
             toast(`Reloaded ${next.configPath}`, "success")
           }
 
-          if (choice === "vault") {
-            await showVaultStatus(state.configPath)
+          if (choice === "secret-store") {
+            await showSecretStoreStatus(state.configPath)
           }
         } catch (error) {
           toastError("Environment action failed", error)

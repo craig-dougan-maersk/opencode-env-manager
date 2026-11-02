@@ -17,14 +17,14 @@ import {
 import { resolveEnvironment, type Entry, type UnsetEntry } from "./resolve.js"
 import { EnvManager } from "./rpc.js"
 import {
-  Vault,
+  SecretStore,
   describeLayer,
   effectiveLayers,
-  emptyVault,
+  emptySecretStore,
   isValidEntryName,
   readGlobalLayers,
   referencedSecrets,
-} from "./vault.js"
+} from "./secret-store.js"
 
 interface Runtime {
   profile?: string
@@ -55,7 +55,7 @@ interface State {
   warnings: string[]
   overrides: { set: Record<string, string>; unset: string[] }
   secrets: Array<{ name: string; entry: string }>
-  vault: {
+  secretStore: {
     configured: boolean
     stores: string[]
     ttlSeconds: number
@@ -77,7 +77,7 @@ export default Plugin.define({
       version: 1,
       defaultProfile: DEFAULT_PROFILE,
       profiles: { [DEFAULT_PROFILE]: newProfile("Default profile") },
-      vault: emptyVault(),
+      secretStore: emptySecretStore(),
     }
 
     try {
@@ -109,12 +109,12 @@ export default Plugin.define({
       }
     }
 
-    const vaultReader = new Vault(directory, async () => {
+    const secretStoreReader = new SecretStore(directory, async () => {
       const cfg = await currentConfig()
       const global = await readGlobalLayers()
       return {
-        layers: effectiveLayers(cfg.vault.stores, global.layers),
-        ttlSeconds: cfg.vault.ttlSeconds,
+        layers: effectiveLayers(cfg.secretStore.stores, global.layers),
+        ttlSeconds: cfg.secretStore.ttlSeconds,
         warnings: global.error ? [global.error] : [],
       }
     })
@@ -156,8 +156,8 @@ export default Plugin.define({
 
     async function state(sessionID: string | undefined, baseEnv?: Record<string, string>): Promise<State> {
       const cfg = await currentConfig()
-      const globalVault = await readGlobalLayers()
-      const vaultLayers = effectiveLayers(cfg.vault.stores, globalVault.layers)
+      const globalStore = await readGlobalLayers()
+      const storeLayers = effectiveLayers(cfg.secretStore.stores, globalStore.layers)
       const runtime = sessionID ? await runtimeFor(sessionID) : { set: {}, unset: new Set<string>() }
       const requested = runtime.profile ?? cfg.defaultProfile
       const profileName = cfg.profiles[requested] ? requested : cfg.defaultProfile
@@ -201,15 +201,15 @@ export default Plugin.define({
         environment: resolved.variables,
         entries: resolved.entries,
         unset: resolved.unset,
-        warnings: globalVault.error ? [...resolved.warnings, globalVault.error] : resolved.warnings,
+        warnings: globalStore.error ? [...resolved.warnings, globalStore.error] : resolved.warnings,
         overrides: { set: { ...runtime.set }, unset: [...runtime.unset] },
         secrets: Object.entries(profile.secrets ?? {})
           .map(([name, entry]) => ({ name, entry }))
           .sort((left, right) => left.name.localeCompare(right.name)),
-        vault: {
-          configured: vaultLayers.length > 0,
-          stores: vaultLayers.map((layer) => describeLayer(layer, directory)),
-          ttlSeconds: cfg.vault.ttlSeconds,
+        secretStore: {
+          configured: storeLayers.length > 0,
+          stores: storeLayers.map((layer) => describeLayer(layer, directory)),
+          ttlSeconds: cfg.secretStore.ttlSeconds,
         },
       }
     }
@@ -226,7 +226,7 @@ export default Plugin.define({
         await change(next)
         await saveConfig(directory, next)
         config = next
-        vaultReader.invalidate()
+        secretStoreReader.invalidate()
         if (after) await after()
         return state(sessionID, baseEnv)
       })
@@ -253,6 +253,38 @@ export default Plugin.define({
         }
         cursor = page.next
         if (!cursor) break
+      }
+    }
+
+    async function secretStoreStatus() {
+      return secretStoreReader.status()
+    }
+
+    async function secretStoreGet(input: unknown) {
+      const value = input as { entries?: unknown }
+      if (!Array.isArray(value?.entries)) throw new Error("entries must be an array")
+      if (value.entries.length > 64) throw new Error("At most 64 secret store entries may be requested at once")
+      const entries: string[] = []
+      for (const item of value.entries) {
+        if (typeof item !== "string") throw new Error("Secret store entry names must be strings")
+        const entry = item.trim()
+        if (!isValidEntryName(entry)) {
+          throw new Error(`Invalid secret store entry name: ${entry}`)
+        }
+        if (!entries.includes(entry)) entries.push(entry)
+      }
+      if (!entries.length) {
+        return { values: {}, missing: [], warnings: [], searched: [] }
+      }
+
+      const resolved = await secretStoreReader.resolve(
+        Object.fromEntries(entries.map((entry) => [entry, entry])),
+      )
+      return {
+        values: resolved.values,
+        missing: resolved.missing,
+        warnings: resolved.warnings,
+        searched: resolved.searched,
       }
     }
 
@@ -396,7 +428,7 @@ export default Plugin.define({
         const name = validateEnvKey(value.name)
         const entry = value.entry.trim()
         if (!isValidEntryName(entry)) {
-          throw new Error("Vault entry names may contain letters, digits, dots, dashes, slashes and underscores")
+          throw new Error("Secret store entry names may contain letters, digits, dots, dashes, slashes and underscores")
         }
         return mutate(undefined, value.baseEnv, (next) => {
           requireProfile(next, value.profile).secrets[name] = entry
@@ -409,34 +441,11 @@ export default Plugin.define({
           delete requireProfile(next, value.profile).secrets[name]
         })
       },
-      vaultStatus: async () => vaultReader.status(),
-      vaultGet: async (input: unknown) => {
-        const value = input as { entries?: unknown }
-        if (!Array.isArray(value?.entries)) throw new Error("entries must be an array")
-        if (value.entries.length > 64) throw new Error("At most 64 vault entries may be requested at once")
-        const entries: string[] = []
-        for (const item of value.entries) {
-          if (typeof item !== "string") throw new Error("Vault entry names must be strings")
-          const entry = item.trim()
-          if (!isValidEntryName(entry)) {
-            throw new Error(`Invalid vault entry name: ${entry}`)
-          }
-          if (!entries.includes(entry)) entries.push(entry)
-        }
-        if (!entries.length) {
-          return { values: {}, missing: [], warnings: [], searched: [] }
-        }
-
-        const resolved = await vaultReader.resolve(
-          Object.fromEntries(entries.map((entry) => [entry, entry])),
-        )
-        return {
-          values: resolved.values,
-          missing: resolved.missing,
-          warnings: resolved.warnings,
-          searched: resolved.searched,
-        }
-      },
+      secretStoreStatus,
+      secretStoreGet,
+      // Pre-rename method names, kept as aliases so older consumers keep working.
+      vaultStatus: secretStoreStatus,
+      vaultGet: secretStoreGet,
       addEnvFile: async (input: unknown) => {
         const value = input as { profile: string; path: string; baseEnv?: Record<string, string> }
         const file = value.path.trim()
@@ -474,7 +483,7 @@ export default Plugin.define({
 
     await ctx.rpc.register(EnvManager, handlers)
 
-    // ---- Vault-backed secrets -------------------------------------------------
+    // ---- Secret-store-backed secrets ------------------------------------------
     // Approve in tool.execute.before (which has the session) and inject in
     // shell.create.before (which has the spawned command's environment). A
     // secret therefore never enters the session environment, only the env of
@@ -555,15 +564,15 @@ export default Plugin.define({
         source: { type: "tool", messageID: event.messageID, id: event.id },
       })
 
-      const resolved = await vaultReader.resolve(
+      const resolved = await secretStoreReader.resolve(
         Object.fromEntries(names.map((name) => [name, profile.secrets[name]!])),
       )
       if (resolved.missing.length) {
         const searched = resolved.searched.length
           ? ` Searched: ${resolved.searched.join(", ")}.`
-          : " No vault layers resolved."
+          : " No secret store layers resolved."
         throw new Error(
-          `Vault entry not found: ${resolved.missing.join(", ")}.${searched} Fix the binding in ${profileConfigPath(directory)}.`,
+          `Secret store entry not found: ${resolved.missing.join(", ")}.${searched} Fix the binding in ${profileConfigPath(directory)}.`,
         )
       }
 
@@ -580,7 +589,7 @@ export default Plugin.define({
       editor.add({
         name: "env_secrets",
         description:
-          "List the vault-backed environment variables bound to the current profile. Values are never returned. " +
+          "List the secret-store-backed environment variables bound to the current profile. Values are never returned. " +
           "Reference a listed name as $NAME or ${NAME} in a shell command and its value is injected for that single " +
           "command only, after the user approves it. Never echo, print or log these values.",
         input: { type: "object", properties: {}, additionalProperties: false } as const,
@@ -588,12 +597,12 @@ export default Plugin.define({
           const profile = await activeProfile(context?.sessionID)
           const entries = Object.entries(profile.secrets).sort(([left], [right]) => left.localeCompare(right))
           if (!entries.length) {
-            return { content: `Profile "${profile.name}" has no vault-backed variables.` }
+            return { content: `Profile "${profile.name}" has no secret-store-backed variables.` }
           }
           return {
             content: [
               `Profile "${profile.name}" injects these variables per command:`,
-              ...entries.map(([name, entry]) => `- $${name} (vault entry ${entry})`),
+              ...entries.map(([name, entry]) => `- $${name} (secret store entry ${entry})`),
               "",
               "Use $NAME or ${NAME} in a shell command to have it set for that one command.",
               "The value never enters the session environment and is never returned to you. Do not echo or print it.",

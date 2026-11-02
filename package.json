@@ -1,7 +1,7 @@
 {
   "name": "opencode-env-manager",
-  "version": "1.1.0",
-  "description": "OpenCode plugin: per-directory environment profiles with an encrypted, per-command secret vault",
+  "version": "1.2.0",
+  "description": "OpenCode plugin: per-directory environment profiles with an encrypted, per-command secret store",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -18,7 +18,8 @@
     "environment",
     "dotenv",
     "secrets",
-    "vault",
+    "secret-store",
+    "local-age",
     "age"
   ],
   "exports": {
