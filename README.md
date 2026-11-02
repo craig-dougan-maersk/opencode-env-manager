@@ -55,8 +55,8 @@ The menu can:
 - view the combined environment (parent shell, `.env` files, profile, session overrides)
 - switch the profile for the current session
 - edit profile variables and `.env` files
-- bind variables to entries in an encrypted vault (see below)
-- check vault status and test decryption
+- bind variables to entries in an encrypted secret store (see below)
+- check secret store status and test decryption
 - create, copy, rename and delete profiles
 - set the default profile for new sessions
 - set/unset session-only overrides
@@ -77,9 +77,9 @@ Automatically created at:
 {
   "version": 1,
   "defaultProfile": "default",
-  "vault": {
+  "secretStore": {
     "stores": [
-      { "store": "~/.config/age/secrets.age", "keyFile": "~/.config/age/keys.txt" }
+      { "type": "local-age", "store": "~/.config/age/secrets.age", "keyFile": "~/.config/age/keys.txt" }
     ]
   },
   "profiles": {
@@ -107,14 +107,14 @@ Automatically created at:
 - The `default` profile always exists and cannot be deleted.
 - New profiles load `.env` by default; missing `.env` is ignored.
 - Values are stored as plain text, and the file is written with mode `0600`.
-  Vault-backed secrets are the exception: `secrets` holds only the mapping from
-  variable name to vault entry, never a value.
+  Secret-store-backed values are the exception: `secrets` holds only the mapping
+  from variable name to secret store entry, never a value.
 - Precedence: parent shell → `.env` files in order → profile variables → session overrides.
 - `.env` values support `$VAR` / `${VAR}` / `${VAR:-fallback}` expansion. Profile and
   session values expand only braced `${VAR}` references, so literal `$` characters
   in passwords and tokens are preserved.
 
-## Vault-backed secrets
+## Secret store
 
 A profile can bind environment variable names to entries in an encrypted store:
 
@@ -126,19 +126,20 @@ A profile can bind environment variable names to entries in an encrypted store:
 ```
 
 The store is decrypted by an external command, so the plugin holds no crypto of
-its own. The default provider is age:
+its own. Each layer names the provider that reads it. The built-in provider is
+`local-age`: an age-encrypted file on disk, decrypted with the age CLI.
 
 ```json
-"vault": {
+"secretStore": {
   "stores": [
-    { "store": "~/.config/age/secrets.age", "keyFile": "~/.config/age/keys.txt" }
+    { "type": "local-age", "store": "~/.config/age/secrets.age", "keyFile": "~/.config/age/keys.txt" }
   ],
   "ttlSeconds": 60
 }
 ```
 
-`scripts/init-vault.sh` creates an identity and an empty encrypted store.
-`scripts/vault-edit.sh` decrypts to a private temp file, opens `$EDITOR`, and
+`scripts/init-local-age.sh` creates an identity and an empty encrypted store.
+`scripts/local-age-edit.sh` decrypts to a private temp file, opens `$EDITOR`, and
 re-encrypts. The decrypted file is a literal `NAME=value` list: `$VAR` is never
 expanded, so credentials containing `$` or backslashes are safe.
 
@@ -149,10 +150,10 @@ project store overrides individual entries and falls through to the inherited
 one for everything else.
 
 ```json
-"vault": {
+"secretStore": {
   "stores": [
-    { "store": ".opencode/secrets.age", "keyFile": "~/.config/age/projects/acme.txt" },
-    { "store": "~/.config/age/secrets.age", "keyFile": "~/.config/age/keys.txt" }
+    { "type": "local-age", "store": ".opencode/secrets.age", "keyFile": "~/.config/age/projects/acme.txt" },
+    { "type": "local-age", "store": "~/.config/age/secrets.age", "keyFile": "~/.config/age/keys.txt" }
   ]
 }
 ```
@@ -162,9 +163,9 @@ A layer every project inherits is declared once, in
 
 ```json
 {
-  "vault": {
+  "secretStore": {
     "stores": [
-      { "store": "~/.config/age/secrets.age", "keyFile": "~/.config/age/keys.txt" }
+      { "type": "local-age", "store": "~/.config/age/secrets.age", "keyFile": "~/.config/age/keys.txt" }
     ],
     "ttlSeconds": 60
   }
@@ -177,11 +178,13 @@ a profile is allowed to expose.
 
 A project store that does not exist yet is skipped rather than fatal, so a fresh
 clone still resolves inherited entries. Other failures — wrong key, corrupt
-store — stop the command instead of falling back silently. `Vault status…` lists
-each layer separately and marks missing ones.
+store — stop the command instead of falling back silently. `Secret store status…`
+lists each layer separately and marks missing ones.
 
 A single flat block (`"store"`, `"keyFile"`, `"provider"` without `stores`) is
 still read and is rewritten as a one-element `stores` list on the next save.
+The pre-rename `"vault"` key is likewise still read and rewritten as
+`"secretStore"` on the next save.
 
 ### What a command sees
 
@@ -199,7 +202,7 @@ Consequences that matter:
 - The transcript and shell history only ever contain `$OPENAI_API_KEY`.
 - Only referenced names are decrypted and injected. A command that mentions no
   bound variable triggers neither a prompt nor a decrypt.
-- A missing vault entry fails the command instead of silently injecting an
+- A missing secret store entry fails the command instead of silently injecting an
   empty string.
 
 ### Required permission rule
@@ -217,9 +220,9 @@ add a rule. Once, in `~/.config/opencode/opencode.json`:
 
 Approvals are never saved (`save: []`), so every use is a fresh decision.
 
-### Denying direct vault access
+### Denying direct secret store access
 
-Approval is pointless if the agent can read the vault itself. Add deny rules
+Approval is pointless if the agent can read the store itself. Add deny rules
 after the ask rule:
 
 ```jsonc
@@ -234,20 +237,22 @@ These are a speed bump, not a sandbox: shell resources are raw command text, so
 a determined command can find another spelling. The real boundary is the
 approval prompt and keeping the identity file readable only by you.
 
-### Other backends
+### Other providers
 
-`vault.provider` is an argv template with `{store}`, `{keyFile}` and `{cwd}`
-substituted. The command must print the whole vault as `NAME=value` lines,
-because one entry can be bound to several variables.
+A layer with a `provider` argv template is a `custom` provider: the argv is run
+with `{store}`, `{keyFile}` and `{cwd}` substituted. The command must print the
+whole store as `NAME=value` lines, because one entry can be bound to several
+variables. (A layer is `custom` whenever `provider` is present; `type` is then
+implied.)
 
 ```jsonc
 // gpg-encrypted dotenv file
-"vault": {
+"secretStore": {
   "stores": [{ "provider": ["gpg", "--quiet", "--decrypt", "{store}"], "store": "~/.secrets/vault.gpg" }]
 }
 
 // sops values file
-"vault": {
+"secretStore": {
   "stores": [{ "provider": ["sops", "--decrypt", "--output-type", "dotenv", "{store}"], "store": "~/vault.sops.env" }]
 }
 ```
@@ -265,7 +270,7 @@ find "$HOME/.password-store" -name '*.gpg' | sed 's|.*/\.password-store/||; s|\.
 ```
 
 ```jsonc
-"vault": { "stores": [{ "provider": ["pass-dump"], "store": "pass" }] }
+"secretStore": { "stores": [{ "provider": ["pass-dump"], "store": "pass" }] }
 ```
 
 `store` doubles as the label shown in the status dialog when the provider does
@@ -273,17 +278,21 @@ not consume it.
 
 ### Plugin API
 
-Other OpenCode plugins can read vault entries through two RPC methods on the
-`env.manager` RPC id:
+Other OpenCode plugins can read secret store entries through two RPC methods on
+the `env.manager` RPC id:
 
-- `vaultStatus()` lists layer status and entry names, never values.
-- `vaultGet({ entries: string[] })` returns
+- `secretStoreStatus()` lists layer status and entry names, never values.
+- `secretStoreGet({ entries: string[] })` returns
   `{ values, missing, warnings, searched }` for up to 64 named entries.
 
-`vaultGet` is a plugin-to-plugin API. It is not exposed as a tool, so the model
-never sees the result. The calling plugin is responsible for approving whatever
-it does with the material. The SSH manager plugin uses this to load private
-keys into a managed `ssh-agent` without putting the key in a shell command.
+The pre-rename names `vaultStatus()` and `vaultGet()` are still served as
+aliases, so a consumer built against env-manager 1.1.0 keeps working.
+
+`secretStoreGet` is a plugin-to-plugin API. It is not exposed as a tool, so the
+model never sees the result. The calling plugin is responsible for approving
+whatever it does with the material. The SSH manager plugin uses this to load
+private keys into a managed `ssh-agent` without putting the key in a shell
+command.
 
 ## Limits
 

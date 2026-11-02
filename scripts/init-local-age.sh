@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Create an age identity and an empty encrypted vault for opencode-env-manager.
+# Create an age identity and an empty encrypted secret store for opencode-env-manager.
+# This is the built-in "local-age" provider: an age-encrypted file on disk.
 # Idempotent: existing files are kept.
 set -euo pipefail
 
 KEY="${AGE_KEY:-$HOME/.config/age/keys.txt}"
-STORE="${VAULT_STORE:-$HOME/.config/age/secrets.age}"
+STORE="${LOCAL_AGE_STORE:-$HOME/.config/age/secrets.age}"
 
 command -v age >/dev/null 2>&1 || { echo "age is not installed: sudo apt install age" >&2; exit 1; }
 command -v age-keygen >/dev/null 2>&1 || { echo "age-keygen is missing (package age)" >&2; exit 1; }
@@ -38,17 +39,17 @@ fi
 
 cat <<EOF
 
-Vault ready.
+Secret store ready (local-age provider).
 
 Add this to .opencode/env-profiles.json (merge with what is already there):
 
-  "vault": {
+  "secretStore": {
     "stores": [
-      { "store": "$STORE", "keyFile": "$KEY" }
+      { "type": "local-age", "store": "$STORE", "keyFile": "$KEY" }
     ]
   }
 
-For a shared layer every project inherits, put the same "vault" block in
+For a shared layer every project inherits, put the same "secretStore" block in
 ~/.config/opencode/env-manager.json instead, and keep only the project store
 in each project.
 
@@ -56,7 +57,7 @@ Bind names per profile, for example:
 
   "secrets": { "OPENAI_API_KEY": "openai/api-key" }
 
-Edit the encrypted contents with: $(dirname "$0")/vault-edit.sh
+Edit the encrypted contents with: $(dirname "$0")/local-age-edit.sh
 
 Public recipient: $recipient
 EOF

@@ -152,6 +152,26 @@ const definition = Rpc.define({
       },
       output: result,
     },
+    secretStoreStatus: {
+      input: {
+        type: "object",
+        properties: { baseEnv: stringMap },
+        additionalProperties: false,
+      },
+      output: result,
+    },
+    secretStoreGet: {
+      input: {
+        type: "object",
+        properties: {
+          entries: { type: "array", items: string, maxItems: 64 },
+        },
+        required: ["entries"],
+        additionalProperties: false,
+      },
+      output: result,
+    },
+    // Pre-rename method names, kept as aliases so older consumers keep working.
     vaultStatus: {
       input: {
         type: "object",
