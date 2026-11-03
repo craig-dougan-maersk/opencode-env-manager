@@ -85,6 +85,15 @@ export default Plugin.define({
       )) as EnvState
     }
 
+    // Every RPC call must carry the location. Without it the call is handled by
+    // the plugin instance for the TUI's own directory, while reads use the
+    // session's directory: profile edits and overrides then went to a different
+    // env-profiles.json than the one the session listed and applied.
+    async function call<T = any>(method: string, input: unknown, sessionID?: string): Promise<T> {
+      const location = await sessionLocation(sessionID)
+      return (await (rpc as any)[method](input, { location })) as T
+    }
+
     async function applyState(sessionID: string | undefined, state: EnvState, quiet = false): Promise<boolean> {
       if (!sessionID) {
         if (!quiet) toast("Open a session first; the profile was saved for this directory.", "warning")
@@ -157,9 +166,9 @@ export default Plugin.define({
       return parts.join(" · ")
     }
 
-    async function showSecretStoreStatus(configPath: string) {
+    async function showSecretStoreStatus(configPath: string, sessionID?: string) {
       try {
-        const status: any = await rpc.secretStoreStatus({ baseEnv: terminalEnv })
+        const status: any = await call("secretStoreStatus", { baseEnv: terminalEnv }, sessionID)
         if (!status?.configured) {
           await context.ui.dialog.alert({
             title: "Secret store not configured",
@@ -358,7 +367,7 @@ export default Plugin.define({
               value: profile.variables[key] ?? "",
             })
             if (value === undefined) continue
-            await rpc.setVariable({ profile: name, key, value, baseEnv: terminalEnv })
+            await call("setVariable", { profile: name, key, value, baseEnv: terminalEnv }, sessionID)
             await afterProfileEdit(sessionID, [name], name)
           }
 
@@ -372,7 +381,7 @@ export default Plugin.define({
               })),
             })
             if (!key) continue
-            await rpc.removeVariable({ profile: name, key, baseEnv: terminalEnv })
+            await call("removeVariable", { profile: name, key, baseEnv: terminalEnv }, sessionID)
             await afterProfileEdit(sessionID, [name], name)
           }
 
@@ -405,7 +414,7 @@ export default Plugin.define({
                 })
               )?.trim()
               if (!entry) continue
-              await rpc.setSecret({ profile: name, name: variable, entry, baseEnv: terminalEnv })
+              await call("setSecret", { profile: name, name: variable, entry, baseEnv: terminalEnv }, sessionID)
               await afterProfileEdit(sessionID, [name], name)
             }
 
@@ -417,12 +426,12 @@ export default Plugin.define({
                   .map((item) => ({ title: item, value: item, description: `entry ${profile.secrets[item]}` })),
               })
               if (!variable) continue
-              await rpc.removeSecret({ profile: name, name: variable, baseEnv: terminalEnv })
+              await call("removeSecret", { profile: name, name: variable, baseEnv: terminalEnv }, sessionID)
               await afterProfileEdit(sessionID, [name], name)
             }
 
             if (sub === "test") {
-              await showSecretStoreStatus(fresh.configPath)
+              await showSecretStoreStatus(fresh.configPath, sessionID)
             }
             continue
           }
@@ -449,7 +458,7 @@ export default Plugin.define({
                   )?.trim()
                 : choice
             if (!file) continue
-            await rpc.addEnvFile({ profile: name, path: file, baseEnv: terminalEnv })
+            await call("addEnvFile", { profile: name, path: file, baseEnv: terminalEnv }, sessionID)
             await afterProfileEdit(sessionID, [name], name)
           }
 
@@ -459,7 +468,7 @@ export default Plugin.define({
               options: profile.envFiles.map((item) => ({ title: item, value: item })),
             })
             if (!file) continue
-            await rpc.removeEnvFile({ profile: name, path: file, baseEnv: terminalEnv })
+            await call("removeEnvFile", { profile: name, path: file, baseEnv: terminalEnv }, sessionID)
             await afterProfileEdit(sessionID, [name], name)
           }
 
@@ -470,7 +479,7 @@ export default Plugin.define({
               label: { confirm: "Clear", cancel: "Cancel" },
             })
             if (!confirmed) continue
-            await rpc.clearEnvFiles({ profile: name, baseEnv: terminalEnv })
+            await call("clearEnvFiles", { profile: name, baseEnv: terminalEnv }, sessionID)
             await afterProfileEdit(sessionID, [name], name)
           }
 
@@ -481,7 +490,7 @@ export default Plugin.define({
               value: name,
             }))?.trim()
             if (!renamed || renamed === name) continue
-            await rpc.renameProfile({ from: name, to: renamed, baseEnv: terminalEnv })
+            await call("renameProfile", { from: name, to: renamed, baseEnv: terminalEnv }, sessionID)
             await afterProfileEdit(sessionID, [name, renamed], renamed)
             return
           }
@@ -511,10 +520,10 @@ export default Plugin.define({
             placeholder: "dev",
           }))?.trim()
           if (!name) return
-          await rpc.createProfile({ name, baseEnv: terminalEnv })
+          await call("createProfile", { name, baseEnv: terminalEnv }, sessionID)
           toast(`Created profile "${name}"`, "success")
           if (sessionID && (await context.ui.dialog.confirm({ title: "Switch session?", message: `Use "${name}" in this session now?` }))) {
-            const switched = await rpc.setProfile({ sessionID, profile: name, baseEnv: terminalEnv })
+            const switched = await call("setProfile", { sessionID, profile: name, baseEnv: terminalEnv }, sessionID)
             await applyState(sessionID, switched as EnvState)
           }
           return
@@ -528,7 +537,7 @@ export default Plugin.define({
             placeholder: `${from}-copy`,
           }))?.trim()
           if (!to) return
-          await rpc.copyProfile({ from, to, baseEnv: terminalEnv })
+          await call("copyProfile", { from, to, baseEnv: terminalEnv }, sessionID)
           toast(`Copied "${from}" to "${to}"`, "success")
           return
         }
@@ -542,7 +551,7 @@ export default Plugin.define({
             value: from,
           }))?.trim()
           if (!to || to === from) return
-          await rpc.renameProfile({ from, to, baseEnv: terminalEnv })
+          await call("renameProfile", { from, to, baseEnv: terminalEnv }, sessionID)
           toast(`Renamed "${from}" to "${to}"`, "success")
           const latest = await getState(sessionID)
           if (sessionID && [from, to].includes(latest.profile)) await applyState(sessionID, latest)
@@ -562,7 +571,7 @@ export default Plugin.define({
             label: { confirm: "Delete", cancel: "Cancel" },
           })
           if (!confirmed) return
-          await rpc.deleteProfile({ name, baseEnv: terminalEnv })
+          await call("deleteProfile", { name, baseEnv: terminalEnv }, sessionID)
           toast(`Deleted "${name}"`, "success")
           const latest = await getState(sessionID)
           if (sessionID && latest.profile !== name) await applyState(sessionID, latest)
@@ -572,14 +581,14 @@ export default Plugin.define({
         if (action === "default") {
           const name = await pickProfile(state, "Default profile for new sessions", state.defaultProfile)
           if (!name) return
-          await rpc.setDefaultProfile({ name, baseEnv: terminalEnv })
+          await call("setDefaultProfile", { name, baseEnv: terminalEnv }, sessionID)
           toast(`New sessions will use "${name}"`, "success")
           const use = await context.ui.dialog.confirm({
             title: "Apply now?",
             message: `Switch this session to "${name}" as well?`,
           })
           if (use && sessionID) {
-            const switched = (await rpc.setProfile({ sessionID, profile: name, baseEnv: terminalEnv })) as EnvState
+            const switched = await call<EnvState>("setProfile", { sessionID, profile: name, baseEnv: terminalEnv }, sessionID)
             await applyState(sessionID, switched)
           }
           return
@@ -672,7 +681,7 @@ export default Plugin.define({
             if (!sessionID) continue
             const profile = await pickProfile(state, "Profile for this session", state.profile)
             if (!profile) continue
-            const next = (await rpc.setProfile({ sessionID, profile, baseEnv: terminalEnv })) as EnvState
+            const next = await call<EnvState>("setProfile", { sessionID, profile, baseEnv: terminalEnv }, sessionID)
             await applyState(sessionID, next)
           }
 
@@ -698,7 +707,7 @@ export default Plugin.define({
               value: state.environment[key] ?? "",
             })
             if (value === undefined) continue
-            const next = (await rpc.setOverride({ sessionID, key, value, baseEnv: terminalEnv })) as EnvState
+            const next = await call<EnvState>("setOverride", { sessionID, key, value, baseEnv: terminalEnv }, sessionID)
             await applyState(sessionID, next)
           }
 
@@ -720,7 +729,7 @@ export default Plugin.define({
                 ? (await context.ui.dialog.prompt({ title: "Variable name to unset", placeholder: "DEBUG" }))?.trim()
                 : picked
             if (!key) continue
-            const next = (await rpc.unsetKey({ sessionID, key, baseEnv: terminalEnv })) as EnvState
+            const next = await call<EnvState>("unsetKey", { sessionID, key, baseEnv: terminalEnv }, sessionID)
             await applyState(sessionID, next)
           }
 
@@ -732,7 +741,7 @@ export default Plugin.define({
               label: { confirm: "Clear", cancel: "Cancel" },
             })
             if (!confirmed) continue
-            const next = (await rpc.clearOverrides({ sessionID, baseEnv: terminalEnv })) as EnvState
+            const next = await call<EnvState>("clearOverrides", { sessionID, baseEnv: terminalEnv }, sessionID)
             await applyState(sessionID, next)
           }
 
@@ -745,12 +754,12 @@ export default Plugin.define({
           if (choice === "default") {
             const profile = await pickProfile(state, "Default profile for new sessions", state.defaultProfile)
             if (!profile) continue
-            await rpc.setDefaultProfile({ name: profile, baseEnv: terminalEnv })
+            await call("setDefaultProfile", { name: profile, baseEnv: terminalEnv }, sessionID)
             toast(`New sessions will use "${profile}"`, "success")
           }
 
           if (choice === "reload") {
-            const next = (await rpc.reload({ sessionID, baseEnv: terminalEnv })) as EnvState
+            const next = await call<EnvState>("reload", { sessionID, baseEnv: terminalEnv }, sessionID)
             toast(`Reloaded ${next.configPath}`, "success")
           }
 
