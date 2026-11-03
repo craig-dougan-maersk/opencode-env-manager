@@ -271,6 +271,12 @@ var tui_default = Plugin.define({
         location: location ?? await sessionLocation(sessionID)
       });
     }
+    async function call(method, input, sessionID) {
+      const location = await sessionLocation(sessionID);
+      return await rpc[method](input, {
+        location
+      });
+    }
     async function applyState(sessionID, state, quiet = false) {
       if (!sessionID) {
         if (!quiet)
@@ -350,11 +356,11 @@ var tui_default = Plugin.define({
         parts.push("active");
       return parts.join(" \xB7 ");
     }
-    async function showSecretStoreStatus(configPath) {
+    async function showSecretStoreStatus(configPath, sessionID) {
       try {
-        const status = await rpc.secretStoreStatus({
+        const status = await call("secretStoreStatus", {
           baseEnv: terminalEnv
-        });
+        }, sessionID);
         if (!status?.configured) {
           await context.ui.dialog.alert({
             title: "Secret store not configured",
@@ -567,12 +573,12 @@ Override chain: ${chainLabel(entry.chain)}`
             });
             if (value === undefined)
               continue;
-            await rpc.setVariable({
+            await call("setVariable", {
               profile: name,
               key,
               value,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await afterProfileEdit(sessionID, [name], name);
           }
           if (action === "remove") {
@@ -586,11 +592,11 @@ Override chain: ${chainLabel(entry.chain)}`
             });
             if (!key)
               continue;
-            await rpc.removeVariable({
+            await call("removeVariable", {
               profile: name,
               key,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await afterProfileEdit(sessionID, [name], name);
           }
           if (action === "secrets") {
@@ -628,12 +634,12 @@ Override chain: ${chainLabel(entry.chain)}`
               }))?.trim();
               if (!entry)
                 continue;
-              await rpc.setSecret({
+              await call("setSecret", {
                 profile: name,
                 name: variable,
                 entry,
                 baseEnv: terminalEnv
-              });
+              }, sessionID);
               await afterProfileEdit(sessionID, [name], name);
             }
             if (sub === "remove") {
@@ -647,15 +653,15 @@ Override chain: ${chainLabel(entry.chain)}`
               });
               if (!variable)
                 continue;
-              await rpc.removeSecret({
+              await call("removeSecret", {
                 profile: name,
                 name: variable,
                 baseEnv: terminalEnv
-              });
+              }, sessionID);
               await afterProfileEdit(sessionID, [name], name);
             }
             if (sub === "test") {
-              await showSecretStoreStatus(fresh.configPath);
+              await showSecretStoreStatus(fresh.configPath, sessionID);
             }
             continue;
           }
@@ -681,11 +687,11 @@ Override chain: ${chainLabel(entry.chain)}`
             }))?.trim() : choice;
             if (!file)
               continue;
-            await rpc.addEnvFile({
+            await call("addEnvFile", {
               profile: name,
               path: file,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await afterProfileEdit(sessionID, [name], name);
           }
           if (action === "remove-file") {
@@ -698,11 +704,11 @@ Override chain: ${chainLabel(entry.chain)}`
             });
             if (!file)
               continue;
-            await rpc.removeEnvFile({
+            await call("removeEnvFile", {
               profile: name,
               path: file,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await afterProfileEdit(sessionID, [name], name);
           }
           if (action === "clear-files") {
@@ -716,10 +722,10 @@ Override chain: ${chainLabel(entry.chain)}`
             });
             if (!confirmed)
               continue;
-            await rpc.clearEnvFiles({
+            await call("clearEnvFiles", {
               profile: name,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await afterProfileEdit(sessionID, [name], name);
           }
           if (action === "rename") {
@@ -730,11 +736,11 @@ Override chain: ${chainLabel(entry.chain)}`
             }))?.trim();
             if (!renamed || renamed === name)
               continue;
-            await rpc.renameProfile({
+            await call("renameProfile", {
               from: name,
               to: renamed,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await afterProfileEdit(sessionID, [name, renamed], renamed);
             return;
           }
@@ -773,20 +779,20 @@ Override chain: ${chainLabel(entry.chain)}`
           }))?.trim();
           if (!name)
             return;
-          await rpc.createProfile({
+          await call("createProfile", {
             name,
             baseEnv: terminalEnv
-          });
+          }, sessionID);
           toast(`Created profile "${name}"`, "success");
           if (sessionID && await context.ui.dialog.confirm({
             title: "Switch session?",
             message: `Use "${name}" in this session now?`
           })) {
-            const switched = await rpc.setProfile({
+            const switched = await call("setProfile", {
               sessionID,
               profile: name,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await applyState(sessionID, switched);
           }
           return;
@@ -801,11 +807,11 @@ Override chain: ${chainLabel(entry.chain)}`
           }))?.trim();
           if (!to)
             return;
-          await rpc.copyProfile({
+          await call("copyProfile", {
             from,
             to,
             baseEnv: terminalEnv
-          });
+          }, sessionID);
           toast(`Copied "${from}" to "${to}"`, "success");
           return;
         }
@@ -820,11 +826,11 @@ Override chain: ${chainLabel(entry.chain)}`
           }))?.trim();
           if (!to || to === from)
             return;
-          await rpc.renameProfile({
+          await call("renameProfile", {
             from,
             to,
             baseEnv: terminalEnv
-          });
+          }, sessionID);
           toast(`Renamed "${from}" to "${to}"`, "success");
           const latest = await getState(sessionID);
           if (sessionID && [from, to].includes(latest.profile))
@@ -852,10 +858,10 @@ Override chain: ${chainLabel(entry.chain)}`
           });
           if (!confirmed)
             return;
-          await rpc.deleteProfile({
+          await call("deleteProfile", {
             name,
             baseEnv: terminalEnv
-          });
+          }, sessionID);
           toast(`Deleted "${name}"`, "success");
           const latest = await getState(sessionID);
           if (sessionID && latest.profile !== name)
@@ -866,21 +872,21 @@ Override chain: ${chainLabel(entry.chain)}`
           const name = await pickProfile(state, "Default profile for new sessions", state.defaultProfile);
           if (!name)
             return;
-          await rpc.setDefaultProfile({
+          await call("setDefaultProfile", {
             name,
             baseEnv: terminalEnv
-          });
+          }, sessionID);
           toast(`New sessions will use "${name}"`, "success");
           const use = await context.ui.dialog.confirm({
             title: "Apply now?",
             message: `Switch this session to "${name}" as well?`
           });
           if (use && sessionID) {
-            const switched = await rpc.setProfile({
+            const switched = await call("setProfile", {
               sessionID,
               profile: name,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await applyState(sessionID, switched);
           }
           return;
@@ -969,11 +975,11 @@ Override chain: ${chainLabel(entry.chain)}`
             const profile = await pickProfile(state, "Profile for this session", state.profile);
             if (!profile)
               continue;
-            const next = await rpc.setProfile({
+            const next = await call("setProfile", {
               sessionID,
               profile,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await applyState(sessionID, next);
           }
           if (choice === "edit") {
@@ -999,12 +1005,12 @@ Override chain: ${chainLabel(entry.chain)}`
             });
             if (value === undefined)
               continue;
-            const next = await rpc.setOverride({
+            const next = await call("setOverride", {
               sessionID,
               key,
               value,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await applyState(sessionID, next);
           }
           if (choice === "unset") {
@@ -1032,11 +1038,11 @@ Override chain: ${chainLabel(entry.chain)}`
             }))?.trim() : picked;
             if (!key)
               continue;
-            const next = await rpc.unsetKey({
+            const next = await call("unsetKey", {
               sessionID,
               key,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await applyState(sessionID, next);
           }
           if (choice === "clear") {
@@ -1052,10 +1058,10 @@ Override chain: ${chainLabel(entry.chain)}`
             });
             if (!confirmed)
               continue;
-            const next = await rpc.clearOverrides({
+            const next = await call("clearOverrides", {
               sessionID,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             await applyState(sessionID, next);
           }
           if (choice === "apply") {
@@ -1068,17 +1074,17 @@ Override chain: ${chainLabel(entry.chain)}`
             const profile = await pickProfile(state, "Default profile for new sessions", state.defaultProfile);
             if (!profile)
               continue;
-            await rpc.setDefaultProfile({
+            await call("setDefaultProfile", {
               name: profile,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             toast(`New sessions will use "${profile}"`, "success");
           }
           if (choice === "reload") {
-            const next = await rpc.reload({
+            const next = await call("reload", {
               sessionID,
               baseEnv: terminalEnv
-            });
+            }, sessionID);
             toast(`Reloaded ${next.configPath}`, "success");
           }
           if (choice === "secret-store") {
