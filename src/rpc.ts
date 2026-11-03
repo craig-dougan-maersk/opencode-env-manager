@@ -63,6 +63,7 @@ const definition = Rpc.define({
   methods: {
     state: { input: sessionInput, output: result },
     resolve: { input: sessionInput, output: result },
+    resolveProfile: { input: profileNameInput, output: result },
     activeProfile: {
       input: {
         type: "object",
