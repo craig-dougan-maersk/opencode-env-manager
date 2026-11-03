@@ -288,6 +288,20 @@ the `env.manager` RPC id:
 The pre-rename names `vaultStatus()` and `vaultGet()` are still served as
 aliases, so a consumer built against env-manager 1.1.0 keeps working.
 
+Environment profiles are reachable through the same RPC id:
+
+- `state({ sessionID, baseEnv })` and `resolve({ sessionID, baseEnv })` return
+  the session's resolved environment, including per-session overrides.
+- `activeProfile({ sessionID })` returns the profile name alone, so a consumer
+  can follow the session without receiving the environment.
+- `resolveProfile({ profile, baseEnv })` returns any named profile resolved
+  against `baseEnv`, without changing the session's selection. This is what lets
+  a consumer run a subprocess under a profile of its own. `profiles[].active` in
+  that reply still describes the session's profile, not the resolved one.
+
+`state`, `resolve` and `activeProfile` are session-scoped and have been in every
+release; `resolveProfile` was added in 1.3.0.
+
 `secretStoreGet` is a plugin-to-plugin API. It is not exposed as a tool, so the
 model never sees the result. The calling plugin is responsible for approving
 whatever it does with the material. The SSH manager plugin uses this to load

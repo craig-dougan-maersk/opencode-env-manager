@@ -154,12 +154,20 @@ export default Plugin.define({
       return runtime
     }
 
-    async function state(sessionID: string | undefined, baseEnv?: Record<string, string>): Promise<State> {
+    async function state(
+      sessionID: string | undefined,
+      baseEnv?: Record<string, string>,
+      options: { profile?: string } = {},
+    ): Promise<State> {
       const cfg = await currentConfig()
       const globalStore = await readGlobalLayers()
       const storeLayers = effectiveLayers(cfg.secretStore.stores, globalStore.layers)
       const runtime = sessionID ? await runtimeFor(sessionID) : { set: {}, unset: new Set<string>() }
-      const requested = runtime.profile ?? cfg.defaultProfile
+      // The profile the session itself is on, independent of any per-call
+      // override, so `profiles[].active` keeps describing the session.
+      const sessionProfile =
+        runtime.profile && cfg.profiles[runtime.profile] ? runtime.profile : cfg.defaultProfile
+      const requested = options.profile ?? sessionProfile
       const profileName = cfg.profiles[requested] ? requested : cfg.defaultProfile
       const profile = cfg.profiles[profileName] ?? cfg.profiles[DEFAULT_PROFILE]!
       const base = baseEnv && typeof baseEnv === "object" ? snapshotEnvironment(baseEnv) : serverEnv
@@ -193,7 +201,7 @@ export default Plugin.define({
           variables: { ...item.variables },
           secrets: { ...(item.secrets ?? {}) },
           envFiles: [...item.envFiles],
-          active: name === profileName,
+          active: name === sessionProfile,
           isDefault: name === cfg.defaultProfile,
         })),
         envFiles,
@@ -212,6 +220,15 @@ export default Plugin.define({
           ttlSeconds: cfg.secretStore.ttlSeconds,
         },
       }
+    }
+
+    async function resolveNamedProfile(
+      name: string,
+      baseEnv?: Record<string, string>,
+    ): Promise<State> {
+      const cfg = await currentConfig()
+      requireProfile(cfg, name)
+      return state(undefined, baseEnv, { profile: name })
     }
 
     async function mutate(
@@ -296,6 +313,15 @@ export default Plugin.define({
       resolve: async (input: unknown) => {
         const value = input as SessionInput
         return state(value.sessionID, value.baseEnv)
+      },
+      // Reads a named profile without changing the session's selection, so a
+      // consumer (for example a terminal) can run under a profile of its own.
+      resolveProfile: async (input: unknown) => {
+        const value = input as { profile?: unknown; baseEnv?: Record<string, string> }
+        if (typeof value?.profile !== "string" || !value.profile.trim()) {
+          throw new Error("profile must be a non-empty string")
+        }
+        return resolveNamedProfile(value.profile.trim(), value.baseEnv)
       },
       // Name only: other plugins can follow the active profile without
       // receiving the resolved environment or any secret values.
